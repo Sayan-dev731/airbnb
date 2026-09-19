@@ -3,9 +3,15 @@
 ---
 
 ## 1. Executive Summary & Objective
-This document details the complete **High-Level Design (HLD)** and **Low-Level Design (LLD)** for a high-concurrency, production-scale vacation-rental marketplace architecture modeled after Airbnb, as well as the concrete software architecture of the implemented full-stack application.
+This document details the complete **High-Level Design (HLD)** and **Low-Level Design (LLD)** for the production-deployed vacation-rental marketplace application modeled after Airbnb, including the cloud infrastructure architecture, database schema, concurrency controls, and client-server interactions.
 
-The design is architected to handle:
+### Live Production Deployment
+- **Frontend Live URL (Vercel Edge)**: [https://airbnb.sayan.codes](https://airbnb.sayan.codes) / [https://airbnb-nine-steel.vercel.app](https://airbnb-nine-steel.vercel.app)
+- **Backend API Live URL (Azure App Service)**: [https://airbnb-endxaec2bsd4b9at.westus3-01.azurewebsites.net](https://airbnb-endxaec2bsd4b9at.westus3-01.azurewebsites.net)
+- **Database**: MongoDB Atlas High-Availability Multi-Region Cluster
+- **Media Delivery**: Cloudinary Global CDN + Direct Device File Uploads (`FileReader`)
+
+The system is architected to handle:
 - **100M+ Monthly Active Users (MAU)** searching properties globally with sub-100ms latency.
 - **Millions of real-time listings** with instant availability filtering and geospatial lookups.
 - **Zero double-booking guarantee** using distributed locking, atomic database transactions, and idempotent payment processing.
@@ -18,105 +24,125 @@ The design is architected to handle:
 ```mermaid
 flowchart TD
     subgraph Clients["Clients & Edge Network"]
-        WebDesktop["Desktop Web (React + Vite)"]
+        WebDesktop["Desktop Web (React 18 + Vite)"]
         WebMobile["Mobile Web / PWA"]
-        Cloudflare["Cloudflare CDN & Edge Caches\n(Static Assets, Images, Edge SSL, WAF, DDoS)"]
-        WebDesktop --> Cloudflare
-        WebMobile --> Cloudflare
+        VercelCDN["Vercel Global Edge Network\n- Global Anycast CDN & Edge Caches\n- Automated SSL & Custom Domain (airbnb.sayan.codes)\n- Client-side Routing & Static Asset Optimization"]
+        WebDesktop --> VercelCDN
+        WebMobile --> VercelCDN
     end
 
-    subgraph Gateway["API Gateway & Load Balancer Layer"]
-        Nginx["NGINX / AWS ALB (Round-Robin & Least-Conn)"]
-        APIGateway["Kong / Express Gateway\n- JWT Authentication & RBAC Enforcement\n- Rate Limiting (Token Bucket / Redis)\n- CORS & Security Headers (Helmet)\n- Request Tracing & Correlation IDs"]
-        Cloudflare --> Nginx
-        Nginx --> APIGateway
+    subgraph AzureCloud["Microsoft Azure Cloud Infrastructure (Region: West US 3)"]
+        AzureFrontDoor["Azure App Service Ingress & Load Balancer\n- Automated SSL Termination\n- Traffic Routing & Health Probes (100% Healthy)\n- Inbound Security & DDOS Protection"]
+        
+        subgraph AzureAppService["Azure App Service (Linux Web App: Node.js 24 LTS)"]
+            APIGateway["Express API Engine & Security Middleware\n- JWT Authentication & RBAC (User / Host / Admin)\n- Rate Limiting (express-rate-limit)\n- CORS Policy & Security Headers (Helmet, Compression)"]
+            
+            subgraph Microservices["Modular Domain Controllers"]
+                AuthService["Auth & RBAC Service\n- Signup, Login, 6-Digit OTP Gatekeeper\n- Refresh Tokens & Session Whitelist"]
+                ListingService["Listing & Inventory Service\n- CRUD Operations & Moderation\n- Inventory, Capacity & Rate Adjustments"]
+                BookingService["Booking & Pricing Engine\n- Real-Time Date Collision Verification\n- Dynamic Multi-Night & 18% GST Engine\n- Lifecycle: Pending -> Confirmed -> Cancelled"]
+                PaymentService["Payment & Payout Engine\n- Idempotent Payment Processing (Debouncing)\n- SHA-256 Card Tokenization\n- Host Payouts & Refund Allocations"]
+                SearchService["Search & Discovery Service\n- Geospatial Proximity Matching\n- Category & City Aggregations"]
+                MediaService["Media Ingestion Service\n- Device File Uploads (FileReader Base64 / Multer)\n- Cloudinary CDN Image Pipeline"]
+                NotificationService["Notification Service\n- Nodemailer SMTP Email Dispatch\n- Booking Confirmation & Invoices"]
+            end
+            
+            APIGateway --> AuthService
+            APIGateway --> ListingService
+            APIGateway --> BookingService
+            APIGateway --> PaymentService
+            APIGateway --> SearchService
+            APIGateway --> MediaService
+            APIGateway --> NotificationService
+        end
     end
 
-    subgraph Services["Core Microservices / Modular Domain Services"]
-        AuthService["Auth & RBAC Service\n- User Registration & Email OTP Verification\n- Access/Refresh Tokens (JWT)\n- Role Switching (User / Host / Admin)"]
-        ListingService["Listing & Inventory Service\n- Listing CRUD & Moderation\n- Inventory & Capacity Controls\n- Dynamic Nightly Rates & Discounts"]
-        BookingService["Booking & Pricing Engine\n- Real-Time Date Collision Verification\n- Multi-Night Rate & GST Tax Engine\n- State Machine (Pending -> Confirmed -> Cancelled)"]
-        PaymentService["Payment & Payout Service\n- Idempotent Payment Processing (Debouncing)\n- Transaction Ledger & Receipt Generator\n- Host Payouts & Refund Allocations"]
-        SearchService["Search & Discovery Service\n- Geospatial Proximity Matching (GeoJSON)\n- Category & Filter Aggregations\n- ElasticSearch / Vector Similarity"]
-        MediaService["Media Ingestion Service\n- Device File Uploads & Local FileReader\n- Cloudinary / S3 Image Pipeline\n- Responsive WebP Transcoding & CDN Delivery"]
-        NotificationService["Notification & Comms Service\n- Async Nodemailer SMTP Dispatch\n- Booking Confirmation & Invoice Emails\n- Host Alerts & OTP Delivery"]
+    VercelCDN -->|Secure HTTPS REST Calls| AzureFrontDoor
+    AzureFrontDoor --> APIGateway
 
-        APIGateway --> AuthService
-        APIGateway --> ListingService
-        APIGateway --> BookingService
-        APIGateway --> PaymentService
-        APIGateway --> SearchService
-        APIGateway --> MediaService
+    subgraph Storage["Data, Media & Caching Tier"]
+        MongoDBAtlas["MongoDB Atlas Cluster (Replica Set)\n- Primary Write Master + Read Replicas\n- Compound Indexes & Geospatial 2dsphere Indexes\n- Collections: Users, Listings, Bookings, Payments, Favorites, Reviews"]
+        CloudinaryCDN["Cloudinary Media CDN / Object Storage\n- High-Res Property Galleries & Cover Photos\n- WebP/AVIF Transcoding & Edge Caching"]
+        RedisCache["Redis Memory Cluster\n- Redlock Distributed Locking\n- Rate-Limiting Buckets & PDP Cache"]
+        
+        AuthService --> MongoDBAtlas
+        ListingService --> MongoDBAtlas
+        BookingService --> MongoDBAtlas
+        BookingService --> RedisCache
+        PaymentService --> MongoDBAtlas
+        SearchService --> MongoDBAtlas
+        MediaService --> CloudinaryCDN
     end
 
-    subgraph AsyncBus["Event-Driven Message Broker (Kafka / Redis Streams)"]
-        EventBroker["Kafka Event Bus / Redis PubSub\n- Events: 'booking.created', 'payment.captured', 'listing.updated'"]
-        BookingService -.->|Publishes| EventBroker
-        PaymentService -.->|Publishes| EventBroker
-        ListingService -.->|Publishes| EventBroker
-        EventBroker -.->|Consumes| NotificationService
-        EventBroker -.->|Consumes| SearchService
-    end
-
-    subgraph Storage["Data & Caching Tier"]
-        RedisCluster["Redis Cluster\n- Session & Refresh Token Whitelist\n- Rate Limit Buckets\n- Redlock Distributed Locking\n- Fast Search Result Cache (TTL 5m)"]
-        MongoDBCluster["MongoDB Replica Set with Sharded Clusters\n- Primary Database (Listings, Bookings, Users, Reviews)\n- Compound Indexes & Geospatial 2dsphere Indexes\n- Write Concern: 'majority', Read Preference: 'nearest'"]
-        Elasticsearch["Elasticsearch Cluster\n- Geospatial Point Indexes (lat/lng)\n- Autocomplete & Fuzzy Destination Search\n- Dynamic Facets (Price, Amenities, Rooms)"]
-        BlobStorage["Object Storage (Cloudinary / AWS S3)\n- Property Image Galleries & Cover Photos\n- User Avatars & Verification Documents"]
-
-        AuthService --> RedisCluster
-        AuthService --> MongoDBCluster
-        ListingService --> MongoDBCluster
-        ListingService --> RedisCluster
-        BookingService --> RedisCluster
-        BookingService --> MongoDBCluster
-        PaymentService --> MongoDBCluster
-        SearchService --> Elasticsearch
-        SearchService --> RedisCluster
-        MediaService --> BlobStorage
+    subgraph Monitoring["Observability & Diagnostics"]
+        AzureInsights["Azure App Service Diagnostics & Health Probes\n- Instance Monitoring (ASP-Collegerg-b095 B1)\n- Node.js 24 LTS Runtime Status"]
+        VercelAnalytics["Vercel Observability & Speed Insights\n- Core Web Vitals (LCP, FID, CLS)\n- Edge Request Logs"]
     end
 ```
 
 ---
 
-## 3. Core System Design Pillars
+## 3. Production Deployment Architecture (Azure + Vercel)
 
-### 3.1 Distributed Concurrency & Zero Double-Booking Strategy
+### 3.1 Frontend Infrastructure: Vercel Edge Network
+- **Hosting Platform**: Vercel Cloud Platform (Hobby/Pro tier).
+- **Domains Configured**:
+  - `airbnb.sayan.codes` (Custom domain with automated Let's Encrypt TLS/SSL).
+  - `airbnb-nine-steel.vercel.app` (Vercel production domain).
+  - `airbnb-lmwvcg7e8-sayans-projects-1a80d8b5.vercel.app` (Deployment preview URL).
+- **Build Pipeline**: Vite production bundle compiler with tree-shaking, code splitting, and gzip/brotli compression.
+- **Edge Routing**: Instant global distribution via Vercel's Anycast Edge Network with single-page app fallback routing (`rewrites: [{ source: "/(.*)", destination: "/index.html" }]`).
+
+### 3.2 Backend Infrastructure: Microsoft Azure App Service
+- **Hosting Platform**: Microsoft Azure Web Apps / App Service.
+- **Resource Group**: `College-rg`.
+- **Region**: `West US 3`.
+- **Operating System & Runtime**: Linux with `Node.js 24 LTS`.
+- **App Service Plan**: `ASP-Collegerg-b095 (Basic: B1)`.
+- **Production Hostname**: `airbnb-endxaec2bsd4b9at.westus3-01.azurewebsites.net`.
+- **Health Check Probes**: Automated health probe monitoring `GET /api/v1/health` returning `100.00% (Healthy)`.
+- **Environment & Secret Management**: Injected securely via Azure App Service Application Settings (`PORT=8000`, `MONGODB_URI`, `ACCESS_TOKEN_SECRET`, `CLOUDINARY_*`, `NODEMAILER_*`).
+
+---
+
+## 4. Core System Design Pillars
+
+### 4.1 Distributed Concurrency & Zero Double-Booking Strategy
 In a high-concurrency booking marketplace, race conditions occur when two guests attempt to book overlapping dates simultaneously.
 
 ```mermaid
 sequenceDiagram
     autonumber
-    actor GuestA as Guest A
-    actor GuestB as Guest B
-    participant API as Booking API
+    actor GuestA as Guest A (Vercel Web)
+    actor GuestB as Guest B (Vercel Web)
+    participant API as Azure App Service (Express)
     participant Redis as Redis Redlock
-    participant DB as MongoDB (Bookings Collection)
+    participant DB as MongoDB Atlas (Bookings Collection)
     participant Payment as Payment Gateway
-    participant Mail as Email Worker
+    participant Mail as Nodemailer Worker
 
-    GuestA->>API: POST /bookings (Check-in: Sep 19, Check-out: Sep 30)
-    GuestB->>API: POST /bookings (Check-in: Sep 20, Check-out: Sep 25)
+    GuestA->>API: POST /payments/process-and-book (Check-in: Sep 19, Check-out: Sep 30)
+    GuestB->>API: POST /payments/process-and-book (Check-in: Sep 20, Check-out: Sep 25)
     
-    API->>Redis: Acquire Lock: `lock:listing:{listingId}` (TTL: 5s)
+    API->>Redis: Acquire Distributed Lock: `lock:listing:{listingId}` (TTL: 5s)
     Note over API,Redis: Guest A acquires lock first. Guest B waits/fails fast.
     
-    API->>DB: Atomic Collision Query:\n`listing: id, bookingStatus: 'confirmed'`, Overlapping check
+    API->>DB: Atomic Collision Query:\n`listing: id, bookingStatus: { $in: ['confirmed', 'pending'] }`, Overlapping dates check
     DB-->>API: 0 Overlapping records found
     
-    API->>Payment: Process idempotent payment
+    API->>Payment: Process idempotent payment (Debounced)
     Payment-->>API: Payment Captured (TxnId, Receipt)
     
-    API->>DB: Insert Booking (Status: 'confirmed')
+    API->>DB: Insert Booking Record (Status: 'confirmed')
     DB-->>API: Booking Created (ID: 6aae...)
     
     API->>Redis: Release Lock: `lock:listing:{listingId}`
-    API->>Mail: Dispatch Async Confirmation Email
+    API->>Mail: Async Nodemailer HTML Confirmation Dispatch
     API-->>GuestA: 201 Created: Reservation Confirmed 🎉
 
     Note over GuestB,API: Guest B acquires lock next:
     API->>DB: Atomic Collision Query
-    DB-->>API: 1 Conflicting Booking Found (Guest A)
+    DB-->>API: 1 Conflicting Booking Found (Guest A's reservation)
     API-->>GuestB: 409 Conflict: "Selected dates are no longer available"
 ```
 
@@ -135,7 +161,7 @@ const conflictingBooking = await Booking.findOne({
 
 ---
 
-### 3.2 Dynamic Pricing & Tax Calculation Engine
+### 4.2 Dynamic Pricing & Tax Calculation Engine
 Every listing supports flexible nightly rates, weekly discounts, cleaning fees, platform service fees, and applicable GST/VAT taxes:
 
 $$\text{Nights} = \max\left(1, \left\lceil \frac{|\text{checkOut} - \text{checkIn}|}{1000 \times 60 \times 60 \times 24} \right\rceil\right)$$
@@ -154,26 +180,26 @@ $$\text{Grand Total} = \text{Discounted Base} + \text{Cleaning Fee} + \text{Serv
 
 ---
 
-### 3.3 Scalability & Sharding Strategy
+### 4.3 Scalability & Sharding Strategy
 
-1. **Database Sharding (MongoDB)**:
+1. **Database Sharding (MongoDB Atlas)**:
    - **Sharding Key for Listings**: `{ "location.city": "hashed", "_id": 1 }` enables high query distribution while allowing localized geographic scatter-gather queries.
    - **Sharding Key for Bookings**: `{ "user": 1, "createdAt": -1 }` ensures fast user trip lookups, paired with secondary indexes on `{ "listing": 1, "bookingStatus": 1, "checkInDate": 1, "checkOutDate": 1 }`.
 2. **Read/Write Splitting**:
    - Primary Node handles write mutations (`createBooking`, `processPaymentAndBook`, `createListing`).
    - Secondary Read Replicas serve high-volume read endpoints (`getListings`, `getListingById`, `checkPrice`).
-3. **Multi-Layered Caching (Redis + CDN)**:
-   - **L1 (Browser / Edge)**: Static assets, images, and fonts cached on Cloudflare edge CDN with `Cache-Control: public, max-age=31536000, immutable`.
+3. **Multi-Layered Caching (Redis + Vercel Edge)**:
+   - **L1 (Vercel Edge / Browser)**: Static assets, images, and fonts cached globally with `Cache-Control: public, max-age=31536000, immutable`.
    - **L2 (Redis Memory Cache)**: Popular property PDP responses cached with a TTL of 300 seconds; invalidated immediately upon host listing mutation (`updateListing`).
 4. **Idempotent Payment Gateway Layer**:
    - Duplicate submissions are intercepted using an `Idempotency-Key` header generated on the client.
-   - Idempotency records are cached in MongoDB / Redis to guarantee that rapid double-clicks on "Confirm and Pay" execute only one bank transaction.
+   - Idempotency records are cached in MongoDB Atlas to guarantee that rapid double-clicks on "Confirm and Pay" execute only one bank transaction.
 
 ---
 
-## 4. Low-Level Design (LLD)
+## 5. Low-Level Design (LLD)
 
-### 4.1 Data Models & Entity Relationships (ERD)
+### 5.1 Data Models & Entity Relationships (ERD)
 
 ```mermaid
 erDiagram
@@ -275,7 +301,7 @@ erDiagram
 
 ---
 
-### 4.2 Frontend Architecture & State Flow
+### 5.2 Frontend Architecture & State Flow
 
 ```mermaid
 graph TD
@@ -310,7 +336,7 @@ graph TD
 
 ---
 
-### 4.3 Photo Tour & Lightbox Interactive Mechanics
+### 5.3 Photo Tour & Lightbox Interactive Mechanics
 
 | View | Trigger | Key Capabilities | Accessibility & Interaction |
 | :--- | :--- | :--- | :--- |
@@ -320,9 +346,9 @@ graph TD
 
 ---
 
-## 5. Security, RBAC & API Contract
+## 6. Security, RBAC & API Contract
 
-### 5.1 Role-Based Access Control (RBAC) Matrix
+### 6.1 Role-Based Access Control (RBAC) Matrix
 
 | Endpoint / Operation | Public | Guest (`user`) | Host (`host`) | Administrator (`admin`) |
 | :--- | :---: | :---: | :---: | :---: |
@@ -344,14 +370,14 @@ graph TD
 
 ---
 
-## 6. Verification and Deployment Guide
+## 7. Verification and Deployment Guide
 
-### 6.1 Prerequisites
-- Node.js `v18+` or `v20+`
-- MongoDB Atlas cluster URI or Local MongoDB instance
-- Modern web browser (Chrome, Safari, Firefox, Edge)
+### 7.1 Production URLs
+- **Vercel Frontend**: [https://airbnb.sayan.codes](https://airbnb.sayan.codes) (or [https://airbnb-nine-steel.vercel.app](https://airbnb-nine-steel.vercel.app))
+- **Azure Backend**: [https://airbnb-endxaec2bsd4b9at.westus3-01.azurewebsites.net](https://airbnb-endxaec2bsd4b9at.westus3-01.azurewebsites.net)
+- **Health Check**: [https://airbnb-endxaec2bsd4b9at.westus3-01.azurewebsites.net/api/v1/health](https://airbnb-endxaec2bsd4b9at.westus3-01.azurewebsites.net/api/v1/health)
 
-### 6.2 Running Locally
+### 7.2 Running Locally
 
 ```bash
 # 1. Start the Backend API Engine
@@ -365,7 +391,7 @@ npm install
 npm run dev # Starts Vite dev server on http://localhost:5173
 ```
 
-### 6.3 Demo Login Credentials
+### 7.3 Demo Login Credentials
 | Role | Email | Password | Access Rights |
 | :--- | :--- | :--- | :--- |
 | **System Admin** | `admin@airbnb.com` | `Password123!` | Full Admin Panel, User Management, Global Bookings |

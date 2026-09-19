@@ -2,6 +2,11 @@
 
 > Full-Stack, Pixel-Perfect Airbnb Clone recreating the complete property listing experience, full-screen Photo Tour, Lightbox modal with keyboard navigation, dynamic booking and pricing engine, Host inventory and device photo uploads, and dedicated Admin governance panel.
 
+### 🌐 Live Production Deployments
+- **Frontend App (Vercel)**: [https://airbnb.sayan.codes](https://airbnb.sayan.codes) / [https://airbnb-nine-steel.vercel.app](https://airbnb-nine-steel.vercel.app)
+- **Backend REST API (Azure App Service)**: [https://airbnb-endxaec2bsd4b9at.westus3-01.azurewebsites.net](https://airbnb-endxaec2bsd4b9at.westus3-01.azurewebsites.net)
+- **Health Check Status**: [https://airbnb-endxaec2bsd4b9at.westus3-01.azurewebsites.net/api/v1/health](https://airbnb-endxaec2bsd4b9at.westus3-01.azurewebsites.net/api/v1/health) (100% Healthy)
+
 ---
 
 ## 🌟 Key Features & Views

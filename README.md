@@ -91,3 +91,4 @@ npm run dev
 
 - 📄 **[SYSTEM_DESIGN.md](file:///Users/sayan-dev731/Code/Work/Airbnb/SYSTEM_DESIGN.md)**: High-Level Design (HLD) & Low-Level Design (LLD) with complete Mermaid architecture diagrams, ERDs, distributed locking concurrency strategy, and API contracts.
 - 📄 **[AI_PROMPTS_AND_WORKFLOW.md](file:///Users/sayan-dev731/Code/Work/Airbnb/AI_PROMPTS_AND_WORKFLOW.md)**: Structured chronological log of AI prompts, agentic workflows, subagent capabilities, and refinement cycles.
+- 📄 **[AGENTS.md](file:///Users/sayan-dev731/Code/Work/Airbnb/AGENTS.md)**: Comprehensive multi-agent architecture reference, specialized subagent roles, skills matrix, inter-agent communication protocol, and decision case studies.
